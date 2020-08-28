@@ -1,0 +1,32 @@
+{
+  "name": "sequelize-transactional-tests",
+  "version": "0.1.1",
+  "description": "Transactional unit tests using sequelize and mocha",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/michailpanagiotis/sequelize-transactional-tests.git"
+  },
+  "keywords": [
+    "mocha",
+    "sequelize",
+    "node.js",
+    "transaction",
+    "unit tests",
+    "transactional"
+  ],
+  "peerDependencies": {
+    "cls-hooked": ">= 4.2.2",
+    "mocha": ">= 8.1.2",
+    "sequelize": ">= 6.3.4"
+  },
+  "author": "Panos Michail",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/michailpanagiotis/sequelize-transactional-tests/issues"
+  },
+  "homepage": "https://github.com/michailpanagiotis/sequelize-transactional-tests#readme"
+}
