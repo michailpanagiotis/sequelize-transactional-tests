@@ -9,14 +9,13 @@ const noClsError = new Error(`
 `);
 
 class TransactionHandler extends EventEmitter {
-  constructor({ sequelize, commitOnError = false } = {}) {
+  constructor({ sequelize, commitOnError = false, onTransaction = () => {}, onCommit = () => {}, onRollback = () => {}} = {}) {
     super();
-    const seqInstance = typeof sequelize === 'function' ? sequelize() : sequelize;
-    if (!seqInstance.constructor._cls) {
-      throw noClsError;
-    }
     this.sequelize = sequelize;
     this.commitOnError = commitOnError;
+    this.onTransaction = onTransaction;
+    this.onCommit = onCommit;
+    this.onRollback = onRollback;
   }
 
   getNamespaceName() {
@@ -48,7 +47,7 @@ class TransactionHandler extends EventEmitter {
       }
       this.emit('transaction', t, mochaPath);
       return t;
-    });
+    }).then((t) => this.onTransaction(t, mochaPath));
   }
 
   stop(failed = false, mochaPath) {
@@ -88,7 +87,7 @@ class TransactionHandler extends EventEmitter {
       }
       this.emit('commit', ended, mochaPath);
       return ended;
-    });
+    }).then((t) => this.onCommit(t, mochaPath));
   }
 
   _rollback(mochaPath) {
@@ -105,7 +104,7 @@ class TransactionHandler extends EventEmitter {
       }
       this.emit('rollback', ended, mochaPath);
       return ended;
-    });
+    }).then((t) => this.onRollback(t, mochaPath));
   }
 
   _patchSavepoints(transaction) {
@@ -163,36 +162,44 @@ const suiteFailed = (suite) => {
 const addMochaHooks = (rootSuite, tHandler) => {
   walkSuite(rootSuite, (suite) => {
     if (suite.root) {
+      // add mocha hooks to tests
       suite.beforeEach(function beforeEach() {
         const inPath = this.currentTest.fullTitle();
         return tHandler.transaction(inPath);
       });
+      // make sure the transaction starts before any other beforeEach hook
       suite._beforeEach.unshift(suite._beforeEach.pop());
       suite.afterEach(function afterEach() {
         const inPath = this.currentTest.fullTitle();
         tHandler.stop(suiteFailed(suite), inPath);
       });
     } else {
+      // add mocha hooks to inner suites
       const path = suite.fullTitle();
       const inPath = `${suite.fullTitle()} beforeAll`;
       suite.beforeAll(() => tHandler.transaction(path));
+      // make sure the transaction starts before any other beforeAll hook
       suite._beforeAll.unshift(suite._beforeAll.pop());
-      suite.beforeAll(() => tHandler.transaction(inPath));
 
-      suite.afterAll(() => tHandler.stop(suiteFailed(suite), inPath));
-      suite._afterAll.unshift(suite._afterAll.pop());
+      if (wrapChildren) {
+        suite.beforeAll(() => tHandler.transaction(inPath));
+
+        suite.afterAll(() => tHandler.stop(suiteFailed(suite), inPath));
+        // make sure the transaction ends before any other afterAll hook
+        suite._afterAll.unshift(suite._afterAll.pop());
+      }
+
       suite.afterAll(() => tHandler.stop(suiteFailed(suite), path));
     }
   });
 };
 
-const patchRunner = (tHandler) => {
+const patchRunner = (namespaceName, tHandler) => {
   const runnerFn = Mocha.Runner.prototype.run;
-  const namespaceName = tHandler.getNamespaceName();
   Object.assign(Mocha.Runner.prototype, {
     run: function run(...args) {
       const namespace = cls.getNamespace(namespaceName);
-      // add mocha hooks for starting/rolling back transactions on the boundaries of each test
+      // add mocha hooks for starting/rolling back transactions on the boundaries of each test/suite
       addMochaHooks(this.suite, tHandler);
       // bind the Mocha runner in the current CLS namespace of sequelize in order for transactions
       // to be automatically applied to each sequelize operation
@@ -201,16 +208,12 @@ const patchRunner = (tHandler) => {
   });
 };
 
-const patchMocha = ({ sequelize, commitOnError }) => {
+const patchMocha = ({ namespaceName, sequelize, commitOnError, onTransaction, onCommit, onRollback }) => {
   if (!sequelize) {
     throw new Error('undefined parameter \'sequelize\'');
   }
-  const seqInstance = typeof sequelize === 'function' ? sequelize() : sequelize;
-  if (!seqInstance.constructor._cls) {
-    throw noClsError;
-  }
-  const tHandler = new TransactionHandler({ sequelize, commitOnError });
-  patchRunner(tHandler);
+  const tHandler = new TransactionHandler({ sequelize, commitOnError, onTransaction, onCommit, onRollback });
+  patchRunner(namespaceName, tHandler);
   return tHandler;
 };
 
