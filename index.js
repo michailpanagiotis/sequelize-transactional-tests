@@ -11,6 +11,34 @@ const noClsError = new Error(`
   (https://sequelize.org/master/manual/transactions.html#automatically-pass-transactions-to-all-queries)
 `);
 
+const getNamespace = () => {
+  if (!Sequelize._cls) {
+    throw noClsError;
+  }
+  const { name } = Sequelize._cls;
+  const namespace = cls.getNamespace(name);
+  return namespace;
+};
+
+const getCurrentTransaction = () => getNamespace().get('transaction');
+
+const getLastSavepoint = () => {
+  const tr = getCurrentTransaction();
+  if (!tr) {
+    return null;
+  }
+  let lastSp = tr;
+  if (tr.savepoints.length > 0) {
+    for (let l = tr.savepoints.length - 1; l >= 0; l -= 1) {
+      if (!tr.savepoints[l].finished) {
+        lastSp = tr.savepoints[l];
+        break;
+      }
+    }
+  }
+  return lastSp;
+};
+
 class TransactionHandler extends EventEmitter {
   constructor({
     sequelize, commitOnError = false, wrapRoot = false, wrapChildren = false,
@@ -29,41 +57,20 @@ class TransactionHandler extends EventEmitter {
     this.onRollback = onRollback;
   }
 
-  getNamespaceName() {
-    const ns = this.getNamespace();
-    if (ns) {
-      return ns.name;
-    }
-    return null;
-  }
-
-  getNamespace() {
-    if (!Sequelize._cls) {
-      throw noClsError;
-    }
-    const { name } = Sequelize._cls;
-    const namespace = cls.getNamespace(name);
-    return namespace;
-  }
-
   getSequelize() {
     return typeof this.sequelize === 'function' ? this.sequelize() : this.sequelize;
   }
 
-  getCurrentTransaction() {
-    return this.getNamespace().get('transaction');
-  }
-
   transaction(mochaPath) {
     const sequelize = this.getSequelize();
-    const current = this.getCurrentTransaction();
+    const current = getCurrentTransaction();
     return sequelize.transaction({
       transaction: current,
       isolationLevel: Transaction.ISOLATION_LEVELS.READ_UNCOMMITTED,
     }).then((t) => {
       if (!current) {
         this._patchSavepoints(t);
-        this.getNamespace().set('transaction', t);
+        getNamespace().set('transaction', t);
       }
       this.emit('transaction', t, mochaPath);
       return t;
@@ -87,13 +94,13 @@ class TransactionHandler extends EventEmitter {
   }
 
   _commit(mochaPath) {
-    const ended = this._getLastSavepoint();
+    const ended = getLastSavepoint();
     if (!ended || ended.finished) {
       return Promise.resolve(ended);
     }
     return ended.commit().then(() => {
       if (!ended.parent) {
-        this.getNamespace().set('transaction', null);
+        getNamespace().set('transaction', null);
       }
       this.emit('commit', ended, mochaPath);
       return ended;
@@ -101,7 +108,7 @@ class TransactionHandler extends EventEmitter {
   }
 
   _rollback(mochaPath) {
-    const ended = this._getLastSavepoint();
+    const ended = getLastSavepoint();
     if (!ended) {
       throw new Error('missing ended');
     }
@@ -110,7 +117,7 @@ class TransactionHandler extends EventEmitter {
     }
     return ended.rollback().then(() => {
       if (!ended.parent) {
-        this.getNamespace().set('transaction', null);
+        getNamespace().set('transaction', null);
       }
       this.emit('rollback', ended, mochaPath);
       return ended;
@@ -133,23 +140,6 @@ class TransactionHandler extends EventEmitter {
         Array.prototype.push.call(this, savepoint);
       },
     });
-  }
-
-  _getLastSavepoint() {
-    const tr = this.getCurrentTransaction();
-    if (!tr) {
-      return null;
-    }
-    let lastSp = tr;
-    if (tr.savepoints.length > 0) {
-      for (let l = tr.savepoints.length - 1; l >= 0; l -= 1) {
-        if (!tr.savepoints[l].finished) {
-          lastSp = tr.savepoints[l];
-          break;
-        }
-      }
-    }
-    return lastSp;
   }
 }
 
@@ -177,7 +167,7 @@ const makeTransactional = (rootSuite) => {
       return res;
     };
   }
-  walkSuite(rootSuite, (suite) => {
+  return walkSuite(rootSuite, (suite) => {
     if (suite === rootSuite) {
       // add mocha hooks to tests
       suite.beforeEach(function beforeEach() {
@@ -216,9 +206,10 @@ const patchRunner = () => {
   const runnerFn = Mocha.Runner.prototype.run;
   Object.assign(Mocha.Runner.prototype, {
     run: function run(...args) {
-      const namespace = tHandler.getNamespace();
+      const namespace = getNamespace();
       if (tHandler.wrapRoot) {
-        // add mocha hooks for starting/rolling back transactions on the boundaries of each test/suite
+        // add mocha hooks for starting/rolling back transactions on the
+        // boundaries of each test/suite
         makeTransactional(this.suite);
       }
       // bind the Mocha runner in the current CLS namespace of sequelize in order for transactions

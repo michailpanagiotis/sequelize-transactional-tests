@@ -1,0 +1,35 @@
+{
+  "name": "sequelize-transactional-tests-example",
+  "version": "0.1.1",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "postinstall": "node sqlite-example-database/setup.js",
+    "setup-example-db": "node sqlite-example-database/setup.js",
+    "test": "NODE_ENV=test mocha ./test/unit/ --recursive --preserve-symlinks",
+    "test-watch": "NODE_ENV=test mocha ./test/unit/ --recursive --watch --preserve-symlinks",
+    "lint": "eslint ./"
+  },
+  "author": "Panos Michail",
+  "bugs": {
+    "url": "https://github.com/michailpanagiotis/sequelize-transactional-tests/issues"
+  },
+  "homepage": "https://github.com/michailpanagiotis/sequelize-transactional-tests/tree/master/example#readme",
+  "devDependencies": {
+    "chai": "^4.2.0",
+    "eslint": "^7.2.0",
+    "eslint-config-airbnb": "^18.2.0",
+    "eslint-plugin-import": "^2.22.0",
+    "eslint-plugin-jsx-a11y": "^6.3.1",
+    "eslint-plugin-mocha": "^8.0.0",
+    "eslint-plugin-react": "^7.20.6",
+    "eslint-plugin-react-hooks": "^4.0.0",
+    "mocha": "^8.1.1"
+  },
+  "dependencies": {
+    "cls-hooked": "^4.2.2",
+    "sequelize": "^6.3.4",
+    "sequelize-transactional-tests": "file:../",
+    "sqlite3": "^5.0.0"
+  }
+}
