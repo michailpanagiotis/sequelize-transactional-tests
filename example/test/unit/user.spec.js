@@ -1,10 +1,10 @@
 /* eslint-env mocha */
 const { expect } = require('chai');
-const sequelize = require('../../src/sequelize');
+const sequelize = require('src/sequelize');
 
 const { User } = sequelize.models;
 
-describe('transactions', () => {
+describe('User model', () => {
   let initialCount;
 
   describe('rolls back correctly', () => {

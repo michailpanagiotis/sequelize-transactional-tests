@@ -6,8 +6,8 @@
   "scripts": {
     "postinstall": "node sqlite-example-database/setup.js",
     "setup-example-db": "node sqlite-example-database/setup.js",
-    "test": "NODE_ENV=test mocha ./test/unit/ --recursive --preserve-symlinks",
-    "test-watch": "NODE_ENV=test mocha ./test/unit/ --recursive --watch --preserve-symlinks",
+    "test": "NODE_PATH=./ NODE_ENV=test mocha ./test/unit/ --recursive --preserve-symlinks",
+    "test-watch": "NODE_PATH=./ NODE_ENV=test mocha ./test/unit/ --recursive --watch --preserve-symlinks",
     "lint": "eslint ./"
   },
   "author": "Panos Michail",
