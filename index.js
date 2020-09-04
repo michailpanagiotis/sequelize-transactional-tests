@@ -23,6 +23,7 @@ class TransactionHandler extends EventEmitter {
     this.sequelize = sequelize;
     this.commitOnError = commitOnError;
     this.wrapChildren = wrapChildren;
+    this.wrapRoot = wrapRoot;
     this.onTransaction = onTransaction;
     this.onCommit = onCommit;
     this.onRollback = onRollback;
