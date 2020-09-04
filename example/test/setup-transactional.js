@@ -5,7 +5,7 @@ const sequelize = require('../src/sequelize');
 sequelize.query('PRAGMA read_uncommitted = true;');
 
 const transactionScope = patchMocha({
-  sequelize: () => sequelize, commitOnError: false, wrapRoot: true,
+  sequelize: () => sequelize, commitOnError: false, wrapRoot: false,
 });
 
 transactionScope.on('transaction', (t, path) => {
