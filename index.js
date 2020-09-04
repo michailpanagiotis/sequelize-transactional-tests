@@ -1,7 +1,10 @@
 const Mocha = require('mocha');
+const Sequelize = require('sequelize');
 const EventEmitter = require('events');
 const cls = require('cls-hooked');
 const { Transaction } = require('sequelize');
+
+let tHandler;
 
 const noClsError = new Error(`
   Sequelize does not have a CLS, set it by running Sequelize.useCLS(namespace)
@@ -9,21 +12,37 @@ const noClsError = new Error(`
 `);
 
 class TransactionHandler extends EventEmitter {
-  constructor({ sequelize, commitOnError = false, onTransaction = () => {}, onCommit = () => {}, onRollback = () => {}} = {}) {
+  constructor({
+    sequelize, commitOnError = false, wrapRoot = false, wrapChildren = false,
+    onTransaction = () => {}, onCommit = () => {}, onRollback = () => {},
+  } = {}) {
+    if (!sequelize) {
+      throw new Error('undefined parameter \'sequelize\'');
+    }
     super();
     this.sequelize = sequelize;
     this.commitOnError = commitOnError;
+    this.wrapChildren = wrapChildren;
     this.onTransaction = onTransaction;
     this.onCommit = onCommit;
     this.onRollback = onRollback;
   }
 
   getNamespaceName() {
-    const ns = this._getNamespace();
+    const ns = this.getNamespace();
     if (ns) {
       return ns.name;
     }
     return null;
+  }
+
+  getNamespace() {
+    if (!Sequelize._cls) {
+      throw noClsError;
+    }
+    const { name } = Sequelize._cls;
+    const namespace = cls.getNamespace(name);
+    return namespace;
   }
 
   getSequelize() {
@@ -31,7 +50,7 @@ class TransactionHandler extends EventEmitter {
   }
 
   getCurrentTransaction() {
-    return this._getNamespace().get('transaction');
+    return this.getNamespace().get('transaction');
   }
 
   transaction(mochaPath) {
@@ -43,7 +62,7 @@ class TransactionHandler extends EventEmitter {
     }).then((t) => {
       if (!current) {
         this._patchSavepoints(t);
-        this._getNamespace().set('transaction', t);
+        this.getNamespace().set('transaction', t);
       }
       this.emit('transaction', t, mochaPath);
       return t;
@@ -66,16 +85,6 @@ class TransactionHandler extends EventEmitter {
     });
   }
 
-  _getNamespace() {
-    const sequelize = this.getSequelize();
-    if (!sequelize || !sequelize.constructor._cls) {
-      throw noClsError;
-    }
-    const { name } = sequelize.constructor._cls;
-    const namespace = cls.getNamespace(name);
-    return namespace;
-  }
-
   _commit(mochaPath) {
     const ended = this._getLastSavepoint();
     if (!ended || ended.finished) {
@@ -83,7 +92,7 @@ class TransactionHandler extends EventEmitter {
     }
     return ended.commit().then(() => {
       if (!ended.parent) {
-        this._getNamespace().set('transaction', null);
+        this.getNamespace().set('transaction', null);
       }
       this.emit('commit', ended, mochaPath);
       return ended;
@@ -100,7 +109,7 @@ class TransactionHandler extends EventEmitter {
     }
     return ended.rollback().then(() => {
       if (!ended.parent) {
-        this._getNamespace().set('transaction', null);
+        this.getNamespace().set('transaction', null);
       }
       this.emit('rollback', ended, mochaPath);
       return ended;
@@ -159,9 +168,17 @@ const suiteFailed = (suite) => {
   return failed;
 };
 
-const addMochaHooks = (rootSuite, tHandler) => {
+const makeTransactional = (rootSuite) => {
+  if (typeof rootSuite === 'function') {
+    return function wT(...args) {
+      const res = rootSuite.bind(this)(...args);
+      makeTransactional(this);
+      return res;
+    };
+  }
   walkSuite(rootSuite, (suite) => {
-    if (suite.root) {
+    if (suite === rootSuite) {
+      console.log('ADDING BEFORE EACH');
       // add mocha hooks to tests
       suite.beforeEach(function beforeEach() {
         const inPath = this.currentTest.fullTitle();
@@ -171,9 +188,11 @@ const addMochaHooks = (rootSuite, tHandler) => {
       suite._beforeEach.unshift(suite._beforeEach.pop());
       suite.afterEach(function afterEach() {
         const inPath = this.currentTest.fullTitle();
-        tHandler.stop(suiteFailed(suite), inPath);
+        return tHandler.stop(suiteFailed(suite), inPath);
       });
-    } else {
+    }
+    if (!suite.root) {
+      console.log('ADDING BEFORE ALL');
       // add mocha hooks to inner suites
       const path = suite.fullTitle();
       const inPath = `${suite.fullTitle()} beforeAll`;
@@ -181,7 +200,7 @@ const addMochaHooks = (rootSuite, tHandler) => {
       // make sure the transaction starts before any other beforeAll hook
       suite._beforeAll.unshift(suite._beforeAll.pop());
 
-      if (wrapChildren) {
+      if (tHandler.wrapChildren) {
         suite.beforeAll(() => tHandler.transaction(inPath));
 
         suite.afterAll(() => tHandler.stop(suiteFailed(suite), inPath));
@@ -194,13 +213,15 @@ const addMochaHooks = (rootSuite, tHandler) => {
   });
 };
 
-const patchRunner = (namespaceName, tHandler) => {
+const patchRunner = () => {
   const runnerFn = Mocha.Runner.prototype.run;
   Object.assign(Mocha.Runner.prototype, {
     run: function run(...args) {
-      const namespace = cls.getNamespace(namespaceName);
-      // add mocha hooks for starting/rolling back transactions on the boundaries of each test/suite
-      addMochaHooks(this.suite, tHandler);
+      const namespace = tHandler.getNamespace();
+      if (tHandler.wrapRoot) {
+        // add mocha hooks for starting/rolling back transactions on the boundaries of each test/suite
+        makeTransactional(this.suite);
+      }
       // bind the Mocha runner in the current CLS namespace of sequelize in order for transactions
       // to be automatically applied to each sequelize operation
       return namespace.bind(runnerFn.bind(this))(...args);
@@ -208,15 +229,13 @@ const patchRunner = (namespaceName, tHandler) => {
   });
 };
 
-const patchMocha = ({ namespaceName, sequelize, commitOnError, onTransaction, onCommit, onRollback }) => {
-  if (!sequelize) {
-    throw new Error('undefined parameter \'sequelize\'');
-  }
-  const tHandler = new TransactionHandler({ sequelize, commitOnError, onTransaction, onCommit, onRollback });
-  patchRunner(namespaceName, tHandler);
+const patchMocha = (...args) => {
+  tHandler = new TransactionHandler(...args);
+  patchRunner();
   return tHandler;
 };
 
 module.exports = {
+  makeTransactional,
   patchMocha,
 };
