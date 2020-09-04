@@ -178,7 +178,6 @@ const makeTransactional = (rootSuite) => {
   }
   walkSuite(rootSuite, (suite) => {
     if (suite === rootSuite) {
-      console.log('ADDING BEFORE EACH');
       // add mocha hooks to tests
       suite.beforeEach(function beforeEach() {
         const inPath = this.currentTest.fullTitle();
@@ -192,7 +191,6 @@ const makeTransactional = (rootSuite) => {
       });
     }
     if (!suite.root) {
-      console.log('ADDING BEFORE ALL');
       // add mocha hooks to inner suites
       const path = suite.fullTitle();
       const inPath = `${suite.fullTitle()} beforeAll`;
