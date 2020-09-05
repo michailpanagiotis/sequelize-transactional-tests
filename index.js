@@ -159,6 +159,15 @@ const suiteFailed = (suite) => {
   return failed;
 };
 
+const bindToNamespace = (suite) => {
+  const namespace = getNamespace();
+  ['tests', '_beforeAll', '_beforeEach', '_afterAll', '_afterEach'].forEach((set) => {
+    suite[set].forEach((test) => {
+      Object.assign(test, { fn: namespace.bind(test.fn) });
+    });
+  });
+};
+
 const makeTransactional = (rootSuite) => {
   if (typeof rootSuite === 'function') {
     return function wT(...args) {
@@ -167,7 +176,8 @@ const makeTransactional = (rootSuite) => {
       return res;
     };
   }
-  return walkSuite(rootSuite, (suite) => {
+  const namespace = getNamespace();
+  return namespace.bind(walkSuite)(rootSuite, (suite) => {
     if (suite === rootSuite) {
       // add mocha hooks to tests
       suite.beforeEach(function beforeEach() {
@@ -199,6 +209,7 @@ const makeTransactional = (rootSuite) => {
 
       suite.afterAll(() => tHandler.stop(suiteFailed(suite), path));
     }
+    bindToNamespace(suite);
   });
 };
 
@@ -206,7 +217,6 @@ const patchRunner = () => {
   const runnerFn = Mocha.Runner.prototype.run;
   Object.assign(Mocha.Runner.prototype, {
     run: function run(...args) {
-      const namespace = getNamespace();
       if (tHandler.wrapRoot) {
         // add mocha hooks for starting/rolling back transactions on the
         // boundaries of each test/suite
@@ -214,7 +224,7 @@ const patchRunner = () => {
       }
       // bind the Mocha runner in the current CLS namespace of sequelize in order for transactions
       // to be automatically applied to each sequelize operation
-      return namespace.bind(runnerFn.bind(this))(...args);
+      return runnerFn.bind(this)(...args);
     },
   });
 };
